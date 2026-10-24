@@ -2,8 +2,8 @@
 // Threads CLI for Yomates — 내 스레드 계정에 글을 올리고, 답글을 달고, 최근 글과 댓글을 본다.
 // 설치할 것 없음: Node.js 18 이상만 있으면 된다(외부 패키지 0개).
 //
-// 토큰은 내 컴퓨터의 ~/.yomates-threads/config.json 에만 저장한다(내 계정만 읽기 권한).
-// 토큰 값은 화면에 절대 출력하지 않는다. 토큰은 클립보드에서 바로 읽어 저장한다 — 채팅에 붙여 넣지 않는다.
+// 토큰은 맥이면 키체인, 윈도우면 내 계정만 풀 수 있는 암호화 파일, 리눅스면 내 계정만 읽는 파일에 둔다.
+// 토큰 값은 화면에 절대 출력하지 않는다. 클립보드에서 한 번 읽어 바로 저장하고 클립보드를 비운다 — 채팅에 붙여 넣지 않는다.
 //
 // 처음 한 번
 //   node threads.mjs secret --from-clipboard   (선택) Meta 앱 시크릿 키를 복사해 둔 상태에서
@@ -24,10 +24,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 
 const GRAPH = "https://graph.threads.net/v1.0";
-const DIR = join(homedir(), ".yomates-threads");
+const DIR = process.env.YOMATES_THREADS_DIR || join(homedir(), ".yomates-threads");   // 시험할 때만 바꾼다
 const FILE = join(DIR, "config.json");
 const DAY = 86400000;
 
@@ -37,17 +37,72 @@ function save(c) {
   writeFileSync(FILE, JSON.stringify(c, null, 2));
   try { chmodSync(DIR, 0o700); chmodSync(FILE, 0o600); } catch {}
 }
-function clipboard() {
+// ===== 비밀값 보관 (2026-10 보안 강화) =====
+// 맥: 키체인(macOS Keychain) / 윈도우: 내 계정만 풀 수 있는 암호화(DPAPI) 파일 / 리눅스: 내 계정만 읽는 파일(600)
+// 값은 명령 인자로 넘기지 않는다(다른 프로그램의 프로세스 목록에 보일 수 있음). 표준입력으로만 넘긴다.
+const KC_SERVICE = process.env.YOMATES_KC_SERVICE || "yomates-threads";
+function vaultSet(name, value) {
+  const os = platform();
+  if (os === "darwin") {
+    const esc = (v) => String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const r = spawnSync("security", ["-i"], { input: `add-generic-password -U -a "${esc(name)}" -s "${KC_SERVICE}" -w "${esc(value)}"\n`, encoding: "utf8" });
+    if (r.status !== 0) throw new Error("키체인에 저장하지 못했어요.");
+    return;
+  }
+  if (os === "win32") {
+    const r = spawnSync("powershell", ["-NoProfile", "-Command", "$v=[Console]::In.ReadToEnd(); ConvertTo-SecureString $v -AsPlainText -Force | ConvertFrom-SecureString"], { input: String(value), encoding: "utf8" });
+    if (r.status !== 0) throw new Error("암호화해서 저장하지 못했어요.");
+    const c = load(); save({ ...c, enc: { ...(c.enc || {}), [name]: r.stdout.trim() } });
+    return;
+  }
+  const c = load(); save({ ...c, plain: { ...(c.plain || {}), [name]: String(value) } });
+}
+function vaultGet(name) {
+  const os = platform();
+  if (os === "darwin") {
+    const r = spawnSync("security", ["find-generic-password", "-a", name, "-s", KC_SERVICE, "-w"], { encoding: "utf8" });
+    return r.status === 0 ? r.stdout.replace(/\n$/, "") : "";
+  }
+  if (os === "win32") {
+    const e = (load().enc || {})[name];
+    if (!e) return "";
+    const r = spawnSync("powershell", ["-NoProfile", "-Command", "$s=[Console]::In.ReadToEnd().Trim() | ConvertTo-SecureString; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))"], { input: e, encoding: "utf8" });
+    return r.status === 0 ? r.stdout.replace(/\r?\n$/, "") : "";
+  }
+  return (load().plain || {})[name] || "";
+}
+function vaultDel(name) {
+  if (platform() === "darwin") spawnSync("security", ["delete-generic-password", "-a", name, "-s", KC_SERVICE], { encoding: "utf8" });
+}
+const vaultWhere = () => (platform() === "darwin" ? "맥 키체인" : platform() === "win32" ? "윈도우 암호화(DPAPI) 파일" : "내 계정만 읽는 파일(600)");
+
+// 클립보드에서 한 번만 읽는다. 지금 클립보드 값이 모양에 안 맞으면 waitSec 동안 새로 복사되기를 기다린다.
+// 읽은 뒤에는 바로 비운다. 값은 화면에 출력하지 않는다.
+function readClipboardRaw() {
   const os = platform();
   const cmd = os === "darwin" ? "pbpaste" : os === "win32" ? 'powershell -NoProfile -Command "Get-Clipboard"' : "xclip -selection clipboard -o 2>/dev/null || wl-paste";
-  const v = execSync(cmd, { encoding: "utf8" }).trim();
-  // 다 읽은 뒤 클립보드를 비운다
+  try { return execSync(cmd, { encoding: "utf8" }).trim(); } catch { return ""; }
+}
+function clearClipboard() {
+  const os = platform();
   try {
     if (os === "darwin") execSync("pbcopy < /dev/null");
     else if (os === "win32") execSync('powershell -NoProfile -Command "Set-Clipboard -Value $null"');
+    else execSync("xclip -selection clipboard < /dev/null 2>/dev/null || wl-copy --clear");
   } catch {}
+}
+async function clipboardSecret(test, waitSec = 90) {
+  const until = Date.now() + waitSec * 1000;
+  let v = readClipboardRaw().replace(/\s+/g, "");
+  while (!test(v) && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 1000));
+    v = readClipboardRaw().replace(/\s+/g, "");
+  }
+  clearClipboard();
+  if (!test(v)) throw new Error(`${waitSec}초 안에 맞는 값이 복사되지 않았어요. 복사 버튼을 누른 뒤 다시 실행해 주세요.`);
   return v;
 }
+
 const out = (o) => console.log(JSON.stringify(o, null, 2));
 
 async function call(method, path, params = {}, tok) {
@@ -70,24 +125,34 @@ async function call(method, path, params = {}, tok) {
 const exchangeUrl = (secret, short) => `https://graph.threads.net/access_token?grant_type=th_exchange_token&client_secret=${encodeURIComponent(secret)}&access_token=${encodeURIComponent(short)}`;
 const refreshUrl = (tok) => `https://graph.threads.net/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(tok)}`;
 
+// 예전 판(평문 config.json)에 토큰이 있으면 금고로 옮기고 파일에서 지운다
+function migrate() {
+  const c = load();
+  if (c.accessToken) { vaultSet("accessToken", c.accessToken); delete c.accessToken; save(c); }
+  if (c.appSecret) { vaultSet("appSecret", c.appSecret); delete c.appSecret; save(c); }
+  return load();
+}
+const token = () => vaultGet("accessToken");
+
 async function refresh(c, force = false) {
   const left = (c.expiresAt || 0) - Date.now();
   const age = Date.now() - (c.savedAt || 0);
   if (!force && left > 10 * DAY) return c;
   if (age < DAY && !force) return c;   // 받은 지 하루가 안 된 토큰은 연장할 수 없다
-  const r = await fetch(refreshUrl(c.accessToken));
+  const r = await fetch(refreshUrl(token()));
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) { if (force) throw new Error(j?.error?.message || "연장 실패"); return c; }
-  const next = { ...c, accessToken: j.access_token, expiresAt: Date.now() + (j.expires_in || 60 * 86400) * 1000, savedAt: Date.now() };
+  vaultSet("accessToken", j.access_token);
+  const next = { ...load(), expiresAt: Date.now() + (j.expires_in || 60 * 86400) * 1000, savedAt: Date.now() };
   save(next);
   return next;
 }
 
 async function ready() {
-  let c = load();
-  if (!c.accessToken) throw new Error("아직 연결되지 않았어요. 'node threads.mjs setup --from-clipboard'를 먼저 해 주세요.");
+  let c = migrate();
+  if (!token()) throw new Error("아직 연결되지 않았어요. 'node threads.mjs setup --from-clipboard'를 먼저 해 주세요.");
   c = await refresh(c);
-  return c;
+  return { ...c, accessToken: token() };
 }
 
 // 컨테이너를 만들고 → 준비될 때까지 기다렸다가 → 발행. replyToId 가 있으면 답글.
@@ -115,42 +180,44 @@ const [cmd, ...rest] = process.argv.slice(2);
 try {
   if (cmd === "secret") {
     if (!rest.includes("--from-clipboard")) throw new Error("앱 시크릿 키를 복사한 뒤 'secret --from-clipboard'로 실행해 주세요.");
-    const v = clipboard();
-    if (!/^[0-9a-f]{32}$/i.test(v)) throw new Error("클립보드 값이 앱 시크릿 키 모양(32자리)이 아니에요. 다시 복사해 주세요.");
-    save({ ...load(), appSecret: v });
-    out({ ok: true, saved: "app secret (토큰을 60일짜리로 바꿀 때 한 번 쓰고 지워요)" });
+    const v = await clipboardSecret((x) => /^[0-9a-f]{32}$/i.test(x));
+    vaultSet("appSecret", v);
+    out({ ok: true, saved: `app secret → ${vaultWhere()} (토큰을 60일짜리로 바꿀 때 한 번 쓰고 지워요)` });
   }
   else if (cmd === "setup") {
     if (!rest.includes("--from-clipboard")) throw new Error("토큰을 복사한 뒤 'setup --from-clipboard'로 실행해 주세요. 토큰을 채팅에 붙여 넣지 마세요.");
-    let tok = clipboard().replace(/\s+/g, "");
-    if (tok.length < 50) throw new Error("클립보드 값이 토큰 모양이 아니에요. Meta 화면에서 토큰을 다시 복사해 주세요.");
-    const c = load();
+    let tok = await clipboardSecret((x) => x.length >= 50 && /^[A-Za-z0-9]+$/.test(x));
+    const c = migrate();
+    const appSecret = vaultGet("appSecret");
     let expiresAt = Date.now() + 60 * DAY, how = "생성기 토큰을 그대로 저장(60일로 봄)";
-    if (c.appSecret) {
-      const r = await fetch(exchangeUrl(c.appSecret, tok));
+    if (appSecret) {
+      const r = await fetch(exchangeUrl(appSecret, tok));
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.access_token) { tok = j.access_token; expiresAt = Date.now() + (j.expires_in || 60 * 86400) * 1000; how = "60일 토큰으로 바꿔 저장"; }
     }
     const me = await call("GET", "/me", { fields: "id,username" }, tok);
-    const { appSecret, ...keep } = c;   // 시크릿은 다 썼으니 지운다
-    save({ ...keep, accessToken: tok, userId: me.id, username: me.username, expiresAt, savedAt: Date.now() });
-    out({ ok: true, account: `@${me.username}`, how, daysLeft: Math.round((expiresAt - Date.now()) / DAY) });
+    vaultSet("accessToken", tok);
+    vaultDel("appSecret");   // 시크릿은 다 썼으니 지운다
+    const keep = load(); if (keep.enc) delete keep.enc.appSecret; if (keep.plain) delete keep.plain.appSecret;
+    save({ ...keep, userId: me.id, username: me.username, expiresAt, savedAt: Date.now() });
+    out({ ok: true, account: `@${me.username}`, how, savedIn: vaultWhere(), daysLeft: Math.round((expiresAt - Date.now()) / DAY) });
   }
   else if (cmd === "status") {
-    const c = load();
-    if (!c.accessToken) out({ connected: false, next: "setup --from-clipboard" });
+    const c = migrate();
+    if (!token()) out({ connected: false, next: "setup --from-clipboard" });
     else {
-      const me = await call("GET", "/me", { fields: "username" }, c.accessToken).catch((e) => ({ error: e.message }));
-      out({ connected: !me.error, account: c.username ? `@${c.username}` : null, daysLeft: Math.round(((c.expiresAt || 0) - Date.now()) / DAY), ...(me.error ? { error: me.error } : {}) });
+      const me = await call("GET", "/me", { fields: "username" }, token()).catch((e) => ({ error: e.message }));
+      out({ connected: !me.error, account: c.username ? `@${c.username}` : null, savedIn: vaultWhere(), daysLeft: Math.round(((c.expiresAt || 0) - Date.now()) / DAY), ...(me.error ? { error: me.error } : {}) });
     }
   }
   else if (cmd === "refresh") {
-    const c = await refresh(load(), true);
+    const c = await refresh(migrate(), true);
     out({ ok: true, daysLeft: Math.round((c.expiresAt - Date.now()) / DAY) });
   }
   else if (cmd === "logout") {
+    vaultDel("accessToken"); vaultDel("appSecret");
     if (existsSync(FILE)) rmSync(FILE);
-    out({ ok: true, removed: FILE });
+    out({ ok: true, removed: [vaultWhere(), FILE] });
   }
   else if (cmd === "post") {
     const c = await ready();
