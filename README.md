@@ -1,5 +1,9 @@
 # yomates-threads-skill
 
+<!-- yomates-install:readme -->
+> **먼저 요메이트(Yomates)가 필요해요.** 이 스킬은 요메이트 앱 안에서 돌아가요. 아직 설치하지 않았다면 [YOMATES-INSTALL.md](YOMATES-INSTALL.md) 순서대로 설치한 뒤 돌아오세요. 공식 다운로드는 https://yomates.ai 하나뿐이에요.
+<!-- /yomates-install:readme -->
+
 요메이트(Yomates)에서 내 스레드(Threads) 계정에 글을 올리고, 답글을 달고, 조회수와 댓글을 확인하게 해 주는 스킬과 CLI예요.
 
 ## 쓰는 법
