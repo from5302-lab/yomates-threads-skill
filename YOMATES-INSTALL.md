@@ -9,7 +9,7 @@
 
 - 컴퓨터: macOS 13 이상 Apple 실리콘(M1 이상) 맥, 또는 윈도우 PC (데비안 계열 리눅스도 돼요)
 - 로그인할 Google 또는 Kakao 계정
-- AI 요금제 하나: Claude Pro·Max, ChatGPT(무료 플랜도 돼요), Google AI Pro·Ultra 중 하나. 없으면 API 키를 넣어도 돼요.
+- AI 요금제 하나: Claude Pro·Max, ChatGPT, Google AI Pro·Ultra 중 하나. 이미 쓰는 요금제가 있으면 그걸 연결해요. 없으면 ChatGPT 는 무료 플랜으로도 연결돼요(요메이트 공식 안내). API 키를 넣어도 돼요.
 - 휴대폰·태블릿에서는 쓸 수 없어요. 컴퓨터용 앱이에요.
 
 ## 1. 내려받기
@@ -18,14 +18,14 @@
 
 ### 맥
 1. https://yomates.ai 에서 **Mac용 다운로드**를 눌러요.
-2. 내려받은 `leviosa-<버전>.dmg` 를 열어요. (파일 이름은 leviosa 로 시작하지만 설치되는 앱 이름은 Yomates 예요.)
+2. 다운로드 폴더에서 내려받은 `leviosa-<버전>.dmg` 를 두 번 눌러 열어요. (파일 이름은 leviosa 로 시작하지만 설치되는 앱 이름은 Yomates 예요.)
 3. **Yomates** 를 응용 프로그램 폴더로 끌어다 놓아요.
 4. 응용 프로그램 폴더에서 **Yomates** 를 열어요.
 
 ### 윈도우
 1. https://yomates.ai 에서 **Windows용 다운로드**를 눌러요.
 2. 내려받은 `leviosa-<버전>-setup.exe` 를 열어요.
-3. 파란 "Windows의 PC 보호" 창이 뜨면 **추가 정보** → **실행**을 눌러요.
+3. 파란 "Windows의 PC 보호" 창이 뜨면 **추가 정보** → **실행**을 눌러요. 요메이트 공식 안내에 따르면 설치 파일은 안전하고, 아직 서명이 없어서 뜨는 창이에요.
 4. 설치가 끝나면 시작 메뉴나 바탕 화면에서 **Yomates** 를 열어요.
 
 ## 2. 로그인하고 AI 연결하기
